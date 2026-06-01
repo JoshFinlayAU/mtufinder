@@ -28,6 +28,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -387,11 +388,92 @@ func findMTU(p prober, lo, hi int, timeout time.Duration, verbose bool) (int, er
 	return best, nil
 }
 
+// result is what we print at the end -- as JSON if --json is set, or as a
+// human-readable line otherwise. Zero-valued fields are omitted in JSON so
+// failure payloads don't carry meaningless mtu=0 / family=0 noise.
+type result struct {
+	Success   bool   `json:"success"`
+	Target    string `json:"target"`
+	IP        string `json:"ip,omitempty"`
+	Family    int    `json:"family,omitempty"`
+	MTU       int    `json:"mtu,omitempty"`
+	Min       int    `json:"min,omitempty"`
+	Max       int    `json:"max,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+	ElapsedMs int64  `json:"elapsed_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func runProbe(target string, minMTU, maxMTU, timeoutMs int, verbose bool) result {
+	start := time.Now()
+	res := result{
+		Target:    target,
+		Max:       maxMTU,
+		TimeoutMs: timeoutMs,
+	}
+
+	dst, isV6, err := resolveTarget(target)
+	if err != nil {
+		res.Error = fmt.Sprintf("cannot resolve %s: %v", target, err)
+		res.ElapsedMs = time.Since(start).Milliseconds()
+		return res
+	}
+	res.IP = dst.String()
+	if isV6 {
+		res.Family = 6
+	} else {
+		res.Family = 4
+	}
+
+	if minMTU == 0 {
+		if isV6 {
+			minMTU = defaultMinV6
+		} else {
+			minMTU = defaultMinV4
+		}
+	}
+	res.Min = minMTU
+
+	var p prober
+	if isV6 {
+		p, err = newProberV6(dst)
+	} else {
+		p, err = newProberV4(dst)
+	}
+	if err != nil {
+		res.Error = err.Error()
+		res.ElapsedMs = time.Since(start).Milliseconds()
+		return res
+	}
+	defer p.close()
+
+	if verbose {
+		fmt.Printf("[*] Target:  %s -> %s (IPv%d)\n", target, res.IP, res.Family)
+		fmt.Printf("[*] OS:      %s\n", runtime.GOOS)
+		fmt.Printf("[*] Range:   %d - %d bytes\n", minMTU, maxMTU)
+		fmt.Printf("[*] Timeout: %d ms/probe\n\n", timeoutMs)
+	}
+
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	mtu, err := findMTU(p, minMTU, maxMTU, timeout, verbose)
+	if err != nil {
+		res.Error = err.Error()
+		res.ElapsedMs = time.Since(start).Milliseconds()
+		return res
+	}
+
+	res.MTU = mtu
+	res.Success = true
+	res.ElapsedMs = time.Since(start).Milliseconds()
+	return res
+}
+
 func main() {
 	minFlag := flag.Int("min", 0, "minimum MTU to probe (default: 68 v4 / 1280 v6)")
 	maxFlag := flag.Int("max", defaultMaxMTU, "maximum MTU to probe")
 	timeoutFlag := flag.Int("timeout", 2000, "per-probe timeout in milliseconds")
 	quietFlag := flag.Bool("quiet", false, "suppress progress output")
+	jsonFlag := flag.Bool("json", false, "emit machine-readable JSON instead of human output (implies -quiet)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "mtufinder - discover path MTU using native ICMP\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <hostname-or-ip>\n\nFlags:\n", os.Args[0])
@@ -404,52 +486,22 @@ func main() {
 		os.Exit(2)
 	}
 
-	target := flag.Arg(0)
-	dst, isV6, err := resolveTarget(target)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot resolve %s: %v\n", target, err)
-		os.Exit(1)
-	}
+	verbose := !*quietFlag && !*jsonFlag
+	res := runProbe(flag.Arg(0), *minFlag, *maxFlag, *timeoutFlag, verbose)
 
-	minMTU := *minFlag
-	if minMTU == 0 {
-		if isV6 {
-			minMTU = defaultMinV6
-		} else {
-			minMTU = defaultMinV4
-		}
-	}
-
-	var p prober
-	if isV6 {
-		p, err = newProberV6(dst)
+	if *jsonFlag {
+		// Always emit JSON to stdout so callers can pipe to jq regardless of
+		// success/failure. Exit code still signals success.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res)
+	} else if res.Success {
+		fmt.Printf("\nPath MTU to %s (%s): %d bytes\n", res.Target, res.IP, res.MTU)
 	} else {
-		p, err = newProberV4(dst)
+		fmt.Fprintln(os.Stderr, "error:", res.Error)
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+
+	if !res.Success {
 		os.Exit(1)
 	}
-	defer p.close()
-
-	verbose := !*quietFlag
-	if verbose {
-		fam := 4
-		if isV6 {
-			fam = 6
-		}
-		fmt.Printf("[*] Target:  %s -> %s (IPv%d)\n", target, dst.String(), fam)
-		fmt.Printf("[*] OS:      %s\n", runtime.GOOS)
-		fmt.Printf("[*] Range:   %d - %d bytes\n", minMTU, *maxFlag)
-		fmt.Printf("[*] Timeout: %d ms/probe\n\n", *timeoutFlag)
-	}
-
-	timeout := time.Duration(*timeoutFlag) * time.Millisecond
-	mtu, err := findMTU(p, minMTU, *maxFlag, timeout, verbose)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\nPath MTU to %s (%s): %d bytes\n", target, dst.String(), mtu)
 }

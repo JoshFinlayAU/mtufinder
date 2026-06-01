@@ -45,7 +45,28 @@ Flags:
   -max int       maximum MTU to probe (default 9000)
   -timeout int   per-probe timeout in milliseconds (default 2000)
   -quiet         suppress progress output
+  -json          emit machine-readable JSON instead of human output (implies -quiet)
 ```
+
+JSON mode for scripts/pipelines — exit code still signals success/failure:
+
+```sh
+$ sudo ./mtufinder --json 8.8.8.8
+{
+  "success": true,
+  "target": "8.8.8.8",
+  "ip": "8.8.8.8",
+  "family": 4,
+  "mtu": 1500,
+  "min": 68,
+  "max": 9000,
+  "timeout_ms": 2000,
+  "elapsed_ms": 214
+}
+```
+
+On failure the same shape comes back with `"success": false` and an `"error"`
+field, so `jq` pipelines don't need a separate error path.
 
 Sample output:
 
