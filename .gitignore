@@ -1,0 +1,6 @@
+mtufinder
+mtufinder.exe
+mtufinder-*
+dist/
+*.sha256
+.DS_Store
