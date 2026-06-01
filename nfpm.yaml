@@ -1,0 +1,21 @@
+name: mtufinder
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Josh Finlay <josh.finlay@kinetix.net.au>
+description: |
+  Path MTU discovery tool using raw ICMP.
+  Binary-searches the maximum MTU along the path to a target host.
+homepage: https://github.com/JoshFinlayAU/mtufinder
+license: MIT
+section: net
+priority: optional
+depends:
+  - libcap2-bin
+contents:
+  - src: ./mtufinder-linux-${ARCH}
+    dst: /usr/bin/mtufinder
+    file_info:
+      mode: 0755
+scripts:
+  postinstall: ./packaging/postinst.sh

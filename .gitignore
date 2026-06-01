@@ -1,6 +1,7 @@
 mtufinder
 mtufinder.exe
 mtufinder-*
+mtufinder_*.deb
+nfpm.gen.yaml
 dist/
-*.sha256
 .DS_Store

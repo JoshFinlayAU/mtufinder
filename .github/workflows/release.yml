@@ -46,15 +46,33 @@ jobs:
         run: |
           out="mtufinder-${GOOS}-${GOARCH}${{ matrix.ext }}"
           go build -trimpath -ldflags "-s -w" -o "$out" ./...
-          sha256sum "$out" > "$out.sha256"
-          ls -la "$out"*
+          ls -la "$out"
+
+      - name: build .deb
+        if: matrix.goos == 'linux'
+        env:
+          ARCH: ${{ matrix.goarch }}
+        run: |
+          # nfpm only expands env vars in version-ish fields, so we sed the
+          # arch/version placeholders into a generated config ourselves.
+          export VERSION="${GITHUB_REF_NAME#v}"
+          sed -e "s|\${ARCH}|$ARCH|g" -e "s|\${VERSION}|$VERSION|g" \
+            nfpm.yaml > nfpm.gen.yaml
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.40.0
+          nfpm pkg -p deb -f nfpm.gen.yaml -t "mtufinder_${VERSION}_${ARCH}.deb"
+          ls -la "mtufinder_${VERSION}_${ARCH}.deb"
 
       - uses: actions/upload-artifact@v4
         with:
           name: mtufinder-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            mtufinder-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
-            mtufinder-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}.sha256
+          path: mtufinder-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.goos == 'linux'
+        with:
+          name: mtufinder-deb-${{ matrix.goarch }}
+          path: mtufinder_*_${{ matrix.goarch }}.deb
           if-no-files-found: error
 
   release:

@@ -28,7 +28,15 @@ GOOS=windows GOARCH=amd64 go build -o mtufinder-windows-amd64.exe mtufinder.go
 GOOS=windows GOARCH=arm64 go build -o mtufinder-windows-arm64.exe mtufinder.go
 ```
 
-Or grab a prebuilt from the [releases page](../../releases).
+Or grab a prebuilt from the [releases page](../../releases). Debian/Ubuntu
+users can install the `.deb` instead:
+
+```sh
+sudo dpkg -i mtufinder_<version>_<arch>.deb
+```
+
+The package's postinst applies `setcap cap_net_raw+ep` for you, so no sudo
+needed at runtime.
 
 ## Usage
 
